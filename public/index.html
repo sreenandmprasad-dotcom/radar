@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATC Surveillance | Flight Data</title>
+<style>
+:root{color-scheme:dark;--bg:#080e13;--panel:#101a22;--line:#263944;--muted:#8ca4ad;--green:#79f2a6;--cyan:#6bdcff;--amber:#ffc66d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#d9e7eb;font:13px/1.45 "Segoe UI",Arial,sans-serif;letter-spacing:.02em}
+header{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;background:#0d151c;border-bottom:1px solid var(--line)}
+.brand{font-size:14px;font-weight:700;letter-spacing:.15em}.brand span{color:var(--green)}.topright{display:flex;gap:18px;align-items:center;color:var(--muted);font-size:11px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:7px;box-shadow:0 0 8px #79f2a6}
+main{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:12px;padding:12px;height:calc(100vh - 58px);min-height:550px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:5px;overflow:hidden;min-height:0}
+.panelhead{height:42px;display:flex;align-items:center;justify-content:space-between;padding:0 13px;border-bottom:1px solid var(--line);font-size:11px;letter-spacing:.12em;font-weight:700}
+.muted{color:var(--muted);font-weight:400;letter-spacing:0}.scopeWrap{height:calc(100% - 42px);position:relative;background:radial-gradient(ellipse at center,#10251f 0%,#0a1715 46%,#07100f 100%)}
+canvas{display:block;width:100%;height:100%}.scopeNote{position:absolute;left:15px;bottom:13px;color:#71958a;font-size:10px;line-height:1.8;pointer-events:none}
+.badge{padding:3px 7px;border:1px solid #315647;border-radius:3px;color:var(--green);font-size:10px}
+.side{display:grid;grid-template-rows:minmax(0,1fr) 190px;gap:12px;min-height:0}.list{overflow:auto}.flight{padding:11px 13px;border-bottom:1px solid #1d2b34;cursor:pointer}.flight:hover,.flight.selected{background:#172a31}.flighttop{display:flex;justify-content:space-between;align-items:center;font-weight:700}.callsign{color:var(--green);font-size:14px;letter-spacing:.08em}.status{font-size:9px;color:var(--amber);border:1px solid #6a5433;padding:2px 5px;border-radius:3px}.route{margin-top:5px;color:#d2e2e7;font-size:11px}.meta{margin-top:5px;color:var(--muted);font-size:10px;display:flex;gap:12px;flex-wrap:wrap}
+.detail{padding:12px;font-size:11px}.detail h3{margin:0 0 10px;font-size:13px;color:var(--green);letter-spacing:.1em}.detailgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.key{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.12em}.value{margin-top:3px;font-size:12px;overflow-wrap:anywhere}.empty{padding:22px 14px;text-align:center;color:var(--muted);font-size:11px}
+footer{position:absolute;top:12px;right:12px;background:#0a1414d9;border:1px solid #254138;padding:6px 8px;color:var(--green);font-size:10px}
+@media(max-width:850px){main{height:auto;min-height:calc(100vh - 58px);grid-template-columns:1fr}.scopeWrap{height:55vh;min-height:350px}.side{grid-template-rows:350px 190px}}
+</style>
+</head>
+<body>
+<header><div class="brand"><span>●</span> SURVEILLANCE <span style="color:#d9e7eb">/</span> ATC</div><div class="topright"><span id="connection"><i class="dot" style="background:#ffc66d"></i>CONNECTING</span><span id="clock">--:--:--Z</span><span>TRAINING SYSTEM</span></div></header>
+<main>
+<section class="panel">
+  <div class="panelhead"><span>RADAR SCOPE <span class="muted">/ POSITIONAL DATA</span></span><span class="badge" id="targetCount">0 TARGETS</span></div>
+  <div class="scopeWrap"><canvas id="scope"></canvas><div class="scopeNote">SIMULATED SCOPE GRID<br>NO LIVE POSITION = NO PLOTTED TARGET<br>FLIGHT PLANS ARE NOT AIRCRAFT POSITIONS</div><footer id="scopeState">POSITION FEED: WAITING</footer></div>
+</section>
+<aside class="side">
+  <section class="panel"><div class="panelhead"><span>FLIGHT PLAN STRIPS</span><span class="muted" id="flightCount">0 FILED</span></div><div class="list" id="flightList"><div class="empty">Waiting for flight plans from Discord…</div></div></section>
+  <section class="panel"><div class="panelhead"><span>FLIGHT DATA</span><span class="muted">SELECT A STRIP</span></div><div class="detail" id="detail"><div class="empty">Select a flight plan to inspect its details.</div></div></section>
+</aside>
+</main>
+<script>
+const canvas=document.getElementById('scope'),ctx=canvas.getContext('2d');
+let flights=[],selected=null;
+const $=id=>document.getElementById(id);
+function time(){ $('clock').textContent=new Date().toISOString().slice(11,19)+'Z'; }
+setInterval(time,1000);time();
+function esc(s){return String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function resize(){const r=canvas.getBoundingClientRect(),d=window.devicePixelRatio||1;canvas.width=Math.max(1,Math.floor(r.width*d));canvas.height=Math.max(1,Math.floor(r.height*d));ctx.setTransform(d,0,0,d,0,0);draw();}
+window.addEventListener('resize',resize);
+function draw(){
+ const w=canvas.clientWidth,h=canvas.clientHeight;if(!w||!h)return;ctx.clearRect(0,0,w,h);
+ ctx.fillStyle='#081310';ctx.fillRect(0,0,w,h);
+ const cx=w/2,cy=h/2,R=Math.min(w,h)*.43;
+ ctx.strokeStyle='rgba(98,174,133,.13)';ctx.lineWidth=1;
+ for(let i=1;i<=4;i++){ctx.beginPath();ctx.arc(cx,cy,R*i/4,0,Math.PI*2);ctx.stroke();}
+ ctx.beginPath();ctx.moveTo(cx-R,cy);ctx.lineTo(cx+R,cy);ctx.moveTo(cx,cy-R);ctx.lineTo(cx,cy+R);ctx.stroke();
+ ctx.strokeStyle='rgba(98,174,133,.07)';
+ for(let x=cx-R;x<cx+R;x+=24){ctx.beginPath();ctx.moveTo(x,cy-R);ctx.lineTo(x,cy+R);ctx.stroke();}
+ for(let y=cy-R;y<cy+R;y+=24){ctx.beginPath();ctx.moveTo(cx-R,y);ctx.lineTo(cx+R,y);ctx.stroke();}
+ ctx.fillStyle='#527d68';ctx.font='10px monospace';ctx.fillText('RANGE RINGS · NOT GEOREFERENCED',14,22);
+ const positioned=flights.filter(f=>Number.isFinite(f.latitude)&&Number.isFinite(f.longitude));
+ // Coordinates are deliberately not mapped to pixels until a geographic map/projection is configured.
+ // We never invent a position for a flight plan.
+ if(!positioned.length){
+  ctx.textAlign='center';ctx.fillStyle='#4c7762';ctx.font='12px monospace';ctx.fillText('NO VALID POSITION REPORTS',cx,cy-5);
+  ctx.fillStyle='#355443';ctx.font='10px monospace';ctx.fillText('FILED FLIGHT PLANS SHOWN IN RIGHT-HAND STRIPS',cx,cy+16);ctx.textAlign='left';
+ } else {
+  // A plotting origin/projection is not configured in this starter. Do not falsely place geographic coordinates.
+  ctx.textAlign='center';ctx.fillStyle='#8ecba7';ctx.font='11px monospace';ctx.fillText(positioned.length+' POSITION REPORT(S) RECEIVED',cx,cy-5);
+  ctx.fillStyle='#6b9b7e';ctx.font='10px monospace';ctx.fillText('CONFIGURE AIRPORT CENTER / RANGE TO PLOT TARGETS',cx,cy+15);ctx.textAlign='left';
+ }
+ $('targetCount').textContent=positioned.length+' TARGETS';
+ $('scopeState').textContent=positioned.length?'POSITION FEED: DATA RECEIVED':'POSITION FEED: WAITING';
+}
+function render(){
+ $('flightCount').textContent=flights.length+' FILED';
+ const list=$('flightList');
+ if(!flights.length){list.innerHTML='<div class="empty">Waiting for flight plans from Discord…<br><br>Post a formatted flight plan in the configured channel.</div>';}
+ else list.innerHTML=flights.slice().sort((a,b)=>a.callsign.localeCompare(b.callsign)).map(f=>`<div class="flight ${selected===f.callsign?'selected':''}" data-call="${esc(f.callsign)}"><div class="flighttop"><span class="callsign">${esc(f.callsign)}</span><span class="status">${esc(f.status||'FILED')}</span></div><div class="route">${esc(f.departure||'????')} → ${esc(f.destination||'????')}</div><div class="meta"><span>ALT ${esc(f.altitude||'—')}</span><span>${f.latitude!=null?'POSITION REPORTED':'NO POSITION'}</span></div><div class="meta">${esc(f.route||'No route provided')}</div></div>`).join('');
+ list.querySelectorAll('.flight').forEach(el=>el.addEventListener('click',()=>{selected=el.dataset.call;render();renderDetail();}));
+ draw();renderDetail();
+}
+function renderDetail(){
+ const f=flights.find(x=>x.callsign===selected);
+ if(!f){$('detail').innerHTML='<div class="empty">Select a flight plan to inspect its details.</div>';return;}
+ $('detail').innerHTML=`<h3>${esc(f.callsign)}</h3><div class="detailgrid">
+ <div><div class="key">Departure</div><div class="value">${esc(f.departure)}</div></div>
+ <div><div class="key">Destination</div><div class="value">${esc(f.destination)}</div></div>
+ <div><div class="key">Filed altitude</div><div class="value">${esc(f.altitude)}</div></div>
+ <div><div class="key">Status</div><div class="value">${esc(f.status)}</div></div>
+ <div style="grid-column:1/-1"><div class="key">Route</div><div class="value">${esc(f.route)}</div></div>
+ <div style="grid-column:1/-1"><div class="key">Position report</div><div class="value">${f.latitude!=null?esc(f.latitude+', '+f.longitude):'No position supplied — not plotted'}</div></div>
+ <div style="grid-column:1/-1"><div class="key">Submitted by</div><div class="value">${esc(f.discordUser)}</div></div>
+ <div style="grid-column:1/-1"><div class="key">Last updated</div><div class="value">${esc(f.updatedAt)}</div></div>
+ </div>`;
+}
+async function load(){try{const r=await fetch('/api/flights');flights=await r.json();$('connection').innerHTML='<i class="dot"></i>BACKEND ONLINE';render();}catch{$('connection').innerHTML='<i class="dot" style="background:#ff7777"></i>BACKEND OFFLINE';}}
+function connect(){
+ const protocol=location.protocol==='https:'?'wss:':'ws:';const ws=new WebSocket(`${protocol}//${location.host}`);
+ ws.onopen=()=>{$('connection').innerHTML='<i class="dot"></i>LIVE CONNECTION';};
+ ws.onmessage=e=>{const msg=JSON.parse(e.data);if(msg.type==='flights'){flights=msg.flights;render();}};
+ ws.onclose=()=>{ $('connection').innerHTML='<i class="dot" style="background:#ffc66d"></i>RECONNECTING';setTimeout(connect,2000);};
+ ws.onerror=()=>ws.close();
+}
+load().then(connect);
+</script>
+</body>
+</html>
