@@ -1,11 +1,16 @@
+
 {
   "name": "discord-atc-radar",
   "version": "1.0.0",
   "private": true,
-  "description": "A starter ATC flight-plan board and radar fed by a Discord channel.",
+  "description": "A starter ATC flight-plan board and radar fed by a D channel.",
   "main": "server.js",
-  "scripts": {"start": "node server.js"},
-  "engines": {"node": ">=20"},
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "discord.js": "^14.22.1",
     "dotenv": "^16.4.7",
